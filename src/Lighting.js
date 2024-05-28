@@ -6,7 +6,9 @@ var VSHADER_SOURCE = `
     attribute vec4 a_Position;
     varying vec2 v_UV;
     varying vec3 v_Normal;
+    varying vec4 v_VertPos;
     uniform mat4 u_ModelMatrix;
+    uniform mat4 u_NormalMatrix;
     uniform mat4 u_GlobalRotateMatrix;
     uniform mat4 u_ViewMatrix;
     uniform mat4 u_ProjectionMatrix;
@@ -14,7 +16,8 @@ var VSHADER_SOURCE = `
     void main() {
         gl_Position = u_ProjectionMatrix * u_ViewMatrix * u_GlobalRotateMatrix * u_ModelMatrix * a_Position;
         v_UV = a_UV;
-        v_Normal = a_Normal;
+        v_Normal = normalize(vec3(u_NormalMatrix * vec4(a_Normal, 1)));
+        v_VertPos = u_ModelMatrix * a_Position;
     }`
 
 // Fragment shader program
@@ -22,7 +25,12 @@ var FSHADER_SOURCE = `
     precision mediump float;
     varying vec2 v_UV;
     varying vec3 v_Normal;
+    varying vec4 v_VertPos;
+
+    uniform vec3 u_lightPos;
+    uniform vec3 u_cameraPos;
     uniform vec4 u_FragColor;  // uniform変数
+    uniform bool u_lightOn;
 
     uniform sampler2D u_Sampler0;
     uniform sampler2D u_Sampler1;
@@ -50,6 +58,35 @@ var FSHADER_SOURCE = `
         else {
             gl_FragColor = vec4(1,.2,.2,1);
         }
+        vec3 lightVector = u_lightPos - vec3(v_VertPos);
+        float r = length(lightVector);
+        // if (r < 1.0) {
+        //     gl_FragColor = vec4(1, 0, 0, 1);
+        // }
+        // else if (r < 2.0) {
+        //     gl_FragColor = vec4(0, 1, 0, 1);
+        // }
+
+        // gl_FragColor = vec4(vec3(gl_FragColor)/(r*r), 1);
+
+        vec3 L = normalize(lightVector);
+        vec3 N = normalize(v_Normal);
+        float nDotL = max(dot(N, L), 0.0);
+
+        vec3 R = reflect(-L, N);
+        vec3 E = normalize(u_cameraPos - vec3(v_VertPos));
+        float specular = pow(max(dot(E, R), 0.0), 10.0);
+
+        vec3 diffuse = vec3(gl_FragColor) * nDotL * 0.7;
+        vec3 ambient = vec3(gl_FragColor) * 0.3;
+        if (u_lightOn) {
+            if (u_whichTexture == 0) {
+                gl_FragColor = vec4(specular + diffuse + ambient, 1.0);
+            }
+            else {
+                gl_FragColor = vec4(diffuse + ambient, 1.0);
+            }
+        }
     }`
 
 // Global Variables
@@ -57,12 +94,16 @@ let canvas;
 let gl;
 let a_Position;
 let a_UV;
+let a_Normal;
 let u_FragColor;
 let u_Size;
 let u_ModelMatrix;
 let u_ProjectionMatrix;
 let u_ViewMatrix;
 let u_GlobalRotateMatrix;
+let u_lightPos;
+let u_cameraPos;
+let u_lightOn;
 let u_Sampler0;
 let u_Sampler1;
 let u_Sampler2;
@@ -118,6 +159,30 @@ function connectVariablestoGLSL() {
     u_FragColor = gl.getUniformLocation(gl.program, 'u_FragColor');
     if (!u_FragColor) {
         console.log('Failed to get the storage location of u_FragColor');
+        return;
+    }
+
+    u_lightPos = gl.getUniformLocation(gl.program, 'u_lightPos');
+    if (!u_lightPos) {
+      console.log('Failed to get the storage location of u_lightPos');
+      return;
+    }
+
+    u_cameraPos = gl.getUniformLocation(gl.program, 'u_cameraPos');
+    if (!u_cameraPos) {
+      console.log('Failed to get the storage location of u_cameraPos');
+      return;
+    }
+
+    u_lightOn = gl.getUniformLocation(gl.program, 'u_lightOn');
+    if (!u_lightOn) {
+      console.log('Failed to get the storage location of u_lightOn');
+      return;
+    }
+
+    u_NormalMatrix = gl.getUniformLocation(gl.program, 'u_NormalMatrix');
+    if (!u_NormalMatrix) {
+        console.log('Failed to get the storage location of u_NormalMatrix');
         return;
     }
 
@@ -189,14 +254,24 @@ let g_leftFootAngle = 12;
 let g_rightFootAngle = 12;
 let g_headAnimation = false;
 let g_magentaAnimation;
+let g_lightPos = [0, 1, -2];
+let g_lightOn = false;
 let g_normalOn = false;
 
 // Set up actions for the HTML UI elements
 function addActionsforHTMLUI() {
 
-    // Size slider
+    
     document.getElementById('normalOn').onclick = function () { g_normalOn = true; };
     document.getElementById('normalOff').onclick = function () { g_normalOn = false; };
+    
+    document.getElementById('light_on').addEventListener('click', function () { g_lightOn = true; });
+    document.getElementById('light_off').addEventListener('click', function () { g_lightOn = false; });
+
+    document.getElementById('lightSlideX').addEventListener('mousemove', function(ev) { if(ev.buttons == 1) {g_lightPos[0] = this.value/100; renderAllShapes();}});
+    document.getElementById('lightSlideY').addEventListener('mousemove', function(ev) { if(ev.buttons == 1) {g_lightPos[1] = this.value/100; renderAllShapes();}});
+    document.getElementById('lightSlideZ').addEventListener('mousemove', function(ev) { if(ev.buttons == 1) {g_lightPos[2] = this.value/100; renderAllShapes();}});
+    
     document.getElementById('kickLeft').addEventListener('input', function () { g_leftAngle = this.value; renderAllShapes() });
     document.getElementById('kickLeftFoot').addEventListener('input', function () { g_leftFootAngle = this.value; renderAllShapes() });
     document.getElementById('kickRight').addEventListener('input', function () { g_rightAngle = this.value; renderAllShapes() });
@@ -381,7 +456,9 @@ function updateAnimationAngles() {
 
     if (g_magentaAnimation) {
         g_magentaAngle = (45 * Math.sin(3 * g_seconds));
-      }
+    }
+
+    g_lightPos[0] = Math.cos(g_seconds);
 
 }
 
@@ -427,56 +504,6 @@ function keydown(ev) {
     console.log(ev.keyCode);
 }
 
-// var g_map = [
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //1
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //2
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //3
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //4
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //5
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //6
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //7
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //8
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //9
-//     [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0], //10
-//     [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0], //11
-//     [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0], //12
-//     [0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], //13
-//     [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], //14
-//     [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], //15
-//     [0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0], //16
-//     [0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //17
-//     [0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //18
-//     [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //19
-//     [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //20
-//     [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //21
-//     [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //22
-//     [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //23
-//     [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], //24
-//     [0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0], //25
-//     [0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0], //26
-//     [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], //27
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0], //28
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //29
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //30
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //31
-//     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //32
-// ];
-    
-
-// function drawMap() {
-//     for (x = 0; x < 32; x++) {
-//         for (y = 0; y < 32; y++) {
-//             if (g_map[x][y] ==  1) {
-//                 var wall = new Cube();
-//                 wall.textureNum = 0;
-//                 wall.matrix.translate(0, -0.75, 0);
-//                 wall.matrix.scale(1, 3, 1);
-//                 wall.matrix.translate(x-16, 0, y-16);
-//                 wall.renderfast();
-//             }
-//         }
-//     }
-// }
 
 function renderAllShapes() {
     var startTime = performance.now();
@@ -515,6 +542,19 @@ function renderAllShapes() {
     sky.matrix.translate(-0.5, -0.5, -0.5);
     sky.renderfast();
 
+    // Light
+    gl.uniform3f(u_lightPos, g_lightPos[0], g_lightPos[1], g_lightPos[2]);
+    gl.uniform3f(u_cameraPos, g_camera.eye.elements[0], g_camera.eye.elements[1], g_camera.eye.elements[2]);
+    gl.uniform1i(u_lightOn, g_lightOn);
+
+    var light = new Cube();
+    light.color = [2, 2, 0, 1];
+    light.matrix.translate(g_lightPos[0], g_lightPos[1], g_lightPos[2]);
+    light.matrix.scale(-.1, -.1, -.1);
+    light.matrix.translate(-.5, -.5, -.5);
+    light.render();
+
+    // Sphere
     var sphere = new Sphere();
     sphere.matrix.translate(-0.75, 0.75, -.3);
     sphere.matrix.scale(.5, .5, .5);
@@ -523,6 +563,7 @@ function renderAllShapes() {
     } else {
         sphere.textureNum = 1;
     }
+    sphere.normalMatrix.setInverseOf(sphere.matrix).transpose();
     sphere.render();
 
     // Floor
@@ -544,28 +585,35 @@ function renderAllShapes() {
     head.matrix.scale(0.45, 0.4, 0.4);
     head.matrix.translate(0, 0.4, -2.125);
     head.matrix.translate(-0.5, -0.5, 0);
+    head.normalMatrix.setInverseOf(head.matrix).transpose();
     head.render();
 
     // Eyes
 
     var leftEye = new Cube();
     leftEye.color = BLACK;
+    if (g_normalOn) leftEye.textureNum = -3;
     leftEye.matrix.scale(0.075, 0.15, 0.1);
     leftEye.matrix.translate(-2, 1.3, -8.6);
+    leftEye.normalMatrix.setInverseOf(leftEye.matrix).transpose();
     leftEye.render();
 
     var rightEye = new Cube();
     rightEye.color = BLACK;
+    if (g_normalOn) rightEye.textureNum = -3;
     rightEye.matrix.scale(0.075, 0.15, 0.1);
     rightEye.matrix.translate(1, 1.3, -8.6);
+    rightEye.normalMatrix.setInverseOf(rightEye.matrix).transpose();
     rightEye.render();
     
     // Ears
     var ear1 = new Cube();
     ear1.color = WHITE;
+    if (g_normalOn) ear1.textureNum = -3;
     ear1.matrix.scale(0.11, 0.6, 0.1);
     ear1.matrix.translate(-1.5, 0.25, -5.75);
     ear1.matrix.rotate(-20, 1, 45, 0);
+    ear1.normalMatrix.setInverseOf(ear1.matrix).transpose();
     ear1.render();
 
     var ear2 = new Cube();
@@ -573,12 +621,14 @@ function renderAllShapes() {
     ear2.matrix.scale(0.11, 0.6, 0.1);
     ear2.matrix.translate(0.5, 0.25, -5.75);
     ear2.matrix.rotate(20, 1, 45, 0);
+    ear2.normalMatrix.setInverseOf(ear2.matrix).transpose();
     ear2.render();
 
     var nose = new Cube();
     nose.color = PINK;
     nose.matrix.scale(0.1, 0.1, 0.1);
     nose.matrix.translate(-0.5, 0.9, -9);
+    nose.normalMatrix.setInverseOf(nose.matrix).transpose();
     nose.render();
 
     
@@ -589,6 +639,7 @@ function renderAllShapes() {
     body.matrix.rotate(12, 1, 0, 0);
     body.matrix.scale(0.5, 0.4, 0.8);
     body.matrix.translate(-0.5, -1, -0.8);
+    body.normalMatrix.setInverseOf(body.matrix).transpose();
     body.render();
 
     // Legs
@@ -596,7 +647,8 @@ function renderAllShapes() {
     frontlegL.color = WHITE;
     frontlegL.matrix.rotate(12, 1, 0, 0);
     frontlegL.matrix.scale(0.15, 0.5, 0.13);
-    frontlegL.matrix.translate(-2, -1.5, -5); 
+    frontlegL.matrix.translate(-2, -1.5, -5);
+    frontlegL.normalMatrix.setInverseOf(frontlegL.matrix).transpose(); 
     frontlegL.render();
 
     var frontlegR = new Cube();
@@ -604,6 +656,7 @@ function renderAllShapes() {
     frontlegR.matrix.rotate(12, 1, 0, 0);
     frontlegR.matrix.scale(0.15, 0.5, 0.13);
     frontlegR.matrix.translate(1, -1.5, -5);
+    frontlegR.normalMatrix.setInverseOf(frontlegR.matrix).transpose();
     frontlegR.render();
 
     // Back haunches
