@@ -67,7 +67,15 @@ var FSHADER_SOURCE = `
         }
         vec3 lightVector = u_lightPos - vec3(v_VertPos);
         float r = length(lightVector);
-        
+        // if (r < 1.0) {
+        //     gl_FragColor = vec4(1, 0, 0, 1);
+        // }
+        // else if (r < 2.0) {
+        //     gl_FragColor = vec4(0, 1, 0, 1);
+        // }
+
+        // gl_FragColor = vec4(vec3(gl_FragColor)/(r*r), 1);
+
         vec3 L = normalize(lightVector);
         vec3 N = normalize(v_Normal);
         float nDotL = max(dot(N, L), 0.0);
@@ -79,20 +87,13 @@ var FSHADER_SOURCE = `
         vec3 diffuse = vec3(gl_FragColor) * nDotL * 0.7;
         vec3 ambient = vec3(gl_FragColor) * 0.3;
         if (u_lightOn) {
-            // if (u_whichTexture == 0) {
-            //     gl_FragColor = vec4(specular*u_lightColor + diffuse*u_lightColor + ambient, 1.0);
-            // }
-            // else {
-            //     gl_FragColor = vec4(diffuse + ambient, 1.0);
-            // }
             if (u_whichTexture == 0) {
-                gl_FragColor = vec4(diffuse+ambient, 1.0);
+                gl_FragColor = vec4(specular + diffuse + ambient, 1.0);
             }
             else {
-                gl_FragColor = vec4(specular * u_lightColor + diffuse * u_lightColor + ambient, gl_FragColor.a);
+                gl_FragColor = vec4(diffuse + ambient, 1.0);
             }
         }
-        
     }`
 
 // Global Variables
@@ -109,12 +110,7 @@ let u_ViewMatrix;
 let u_GlobalRotateMatrix;
 let u_lightPos;
 let u_cameraPos;
-let u_spotLightPos;
-let u_spotLightCutoff;
-let u_spotLightDir;
-let u_normalOn;
 let u_lightOn;
-let u_lightColor;
 let u_Sampler0;
 let u_Sampler1;
 let u_Sampler2;
@@ -123,7 +119,6 @@ let g_globalX = 0;
 let g_globalY = 0;
 let g_globalZ = 0;
 let g_origin = [0, 0];
-let g_lightColor = [1.0, 1.0, 1.0];
 
 function setupWebGL() {
     // Retrieve <canvas> element
@@ -147,12 +142,14 @@ function connectVariablestoGLSL() {
         return;
     }
 
+    // Get the storage location of a_Position
     a_Position = gl.getAttribLocation(gl.program, 'a_Position');
     if (a_Position < 0) {
         console.log('Failed to get the storage location of a_Position');
         return;
     }
 
+    // Get the storage location of a_UV
     a_UV = gl.getAttribLocation(gl.program, 'a_UV');
     if (a_UV < 0) {
         console.log('Failed to get the storage location of a_UV');
@@ -190,18 +187,6 @@ function connectVariablestoGLSL() {
       return;
     }
 
-    u_lightColor = gl.getUniformLocation(gl.program, 'u_lightColor');
-    if (!u_lightColor) {
-      console.log('Failed to get the storage location of u_lightColor');
-      return;
-    }
-
-    u_normalOn = gl.getUniformLocation(gl.program, 'u_normalOn');
-    if (!u_normalOn) {
-      console.log('Failed to get the storage location of u_normalOn');
-      return;
-    }
-    
     u_NormalMatrix = gl.getUniformLocation(gl.program, 'u_NormalMatrix');
     if (!u_NormalMatrix) {
         console.log('Failed to get the storage location of u_NormalMatrix');
@@ -293,8 +278,7 @@ function addActionsforHTMLUI() {
     document.getElementById('lightSlideX').addEventListener('mousemove', function(ev) { if(ev.buttons == 1) {g_lightPos[0] = this.value/100; renderAllShapes();}});
     document.getElementById('lightSlideY').addEventListener('mousemove', function(ev) { if(ev.buttons == 1) {g_lightPos[1] = this.value/100; renderAllShapes();}});
     document.getElementById('lightSlideZ').addEventListener('mousemove', function(ev) { if(ev.buttons == 1) {g_lightPos[2] = this.value/100; renderAllShapes();}});
-    document.getElementById('colorSlide').addEventListener('mousemove', function () { g_lightColor[2] = this.value / 10; });
-
+    
     document.getElementById('kickLeft').addEventListener('input', function () { g_leftAngle = this.value; renderAllShapes() });
     document.getElementById('kickLeftFoot').addEventListener('input', function () { g_leftFootAngle = this.value; renderAllShapes() });
     document.getElementById('kickRight').addEventListener('input', function () { g_rightAngle = this.value; renderAllShapes() });
@@ -527,6 +511,57 @@ function keydown(ev) {
     console.log(ev.keyCode);
 }
 
+var g_map = [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //1
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //2
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //3
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //4
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //5
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //6
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //7
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //8
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //9
+    [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0], //10
+    [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0], //11
+    [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0], //12
+    [0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], //13
+    [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], //14
+    [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], //15
+    [0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0], //16
+    [0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //17
+    [0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //18
+    [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //19
+    [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //20
+    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //21
+    [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //22
+    [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], //23
+    [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0], //24
+    [0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0], //25
+    [0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0], //26
+    [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], //27
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0], //28
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //29
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //30
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //31
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], //32
+];
+    
+
+function drawMap() {
+    for (x = 0; x < 32; x++) {
+        for (y = 0; y < 32; y++) {
+            if (g_map[x][y] ==  1) {
+                var wall = new Cube();
+                wall.textureNum = 0;
+                wall.matrix.translate(0, -0.75, 0);
+                wall.matrix.scale(1, 3, 1);
+                wall.matrix.translate(x-16, 0, y-16);
+                wall.renderfast();
+            }
+        }
+    }
+}
+
 
 function renderAllShapes() {
     var startTime = performance.now();
@@ -553,25 +588,22 @@ function renderAllShapes() {
 
     // Colors
     var BLACK = [0.230, 0.182, 0.182, 1.0];
-    var BROWN = [0.610, 0.603, 0.531, 1.0];
     var PINK = [0.830, 0.681, 0.681, 1.0];
-    // var WHITE = [1.0, 1.0, 1.0, 1.0];
+    var WHITE = [1.0, 1.0, 1.0, 1.0];
 
     // Skybox 
     var sky = new Cube();
     sky.color = [1.0, 0.0, 0.0, 1.0];
-    sky.textureNum = 2;
     if (g_normalOn) sky.textureNum = -3;
+    // sky.textureNum = 2;
     sky.matrix.scale(-50, -50, -50);
     sky.matrix.translate(-0.5, -0.5, -0.5);
     sky.renderfast();
 
     // Light
     gl.uniform3f(u_lightPos, g_lightPos[0], g_lightPos[1], g_lightPos[2]);
-    gl.uniform3f(u_lightColor, g_lightColor[0], g_lightColor[1], g_lightColor[2]);
     gl.uniform3f(u_cameraPos, g_camera.eye.elements[0], g_camera.eye.elements[1], g_camera.eye.elements[2]);
     gl.uniform1i(u_lightOn, g_lightOn);
-    // gl.uniform1i(u_normalOn, g_normalOn);
 
     var light = new Cube();
     light.color = [2, 2, 0, 1];
@@ -579,15 +611,6 @@ function renderAllShapes() {
     light.matrix.scale(-.1, -.1, -.1);
     light.matrix.translate(-.5, -.5, -.5);
     light.render();
-
-    // Cubes
-    icecube = new Cube();
-    icecube.textureNum = 2;
-    if (g_normalOn)icecube.textureNum = -3;
-    icecube.matrix.scale(.5, .5, .5);
-    icecube.matrix.translate(-2, 0.5, 4);
-    icecube.normalMatrix.setInverseOf(icecube.matrix).transpose();
-    icecube.render();
 
     // Sphere
     var sphere = new Sphere();
@@ -615,7 +638,7 @@ function renderAllShapes() {
     // Bunny head
 
     var head = new Cube();
-    head.color = BROWN;
+    head.color = WHITE;
     if (g_normalOn) head.textureNum = -3;
     head.matrix.scale(0.45, 0.4, 0.4);
     head.matrix.translate(0, 0.4, -2.125);
@@ -643,7 +666,7 @@ function renderAllShapes() {
     
     // Ears
     var ear1 = new Cube();
-    ear1.color = BROWN;
+    ear1.color = WHITE;
     if (g_normalOn) ear1.textureNum = -3;
     ear1.matrix.scale(0.11, 0.6, 0.1);
     ear1.matrix.translate(-1.5, 0.25, -5.75);
@@ -652,7 +675,7 @@ function renderAllShapes() {
     ear1.render();
 
     var ear2 = new Cube();
-    ear2.color = BROWN;
+    ear2.color = WHITE;
     if (g_normalOn) ear2.textureNum = -3;
     ear2.matrix.scale(0.11, 0.6, 0.1);
     ear2.matrix.translate(0.5, 0.25, -5.75);
@@ -672,7 +695,7 @@ function renderAllShapes() {
     // Body
 
     var body = new Cube();
-    body.color = BROWN;
+    body.color = WHITE;
     if (g_normalOn) body.textureNum = -3;
     body.matrix.rotate(12, 1, 0, 0);
     body.matrix.scale(0.5, 0.4, 0.8);
@@ -682,7 +705,7 @@ function renderAllShapes() {
 
     // Legs
     var frontlegL = new Cube();
-    frontlegL.color = BROWN;
+    frontlegL.color = WHITE;
     if (g_normalOn) frontlegL.textureNum = -3;
     frontlegL.matrix.rotate(12, 1, 0, 0);
     frontlegL.matrix.scale(0.15, 0.5, 0.13);
@@ -691,7 +714,7 @@ function renderAllShapes() {
     frontlegL.render();
 
     var frontlegR = new Cube();
-    frontlegR.color = BROWN;
+    frontlegR.color = WHITE;
     if (g_normalOn) frontlegR.textureNum = -3;
     frontlegR.matrix.rotate(12, 1, 0, 0);
     frontlegR.matrix.scale(0.15, 0.5, 0.13);
@@ -701,7 +724,7 @@ function renderAllShapes() {
 
     // Back haunches
     var haunchL = new Cube();
-    haunchL.color = BROWN;
+    haunchL.color = WHITE;
     if (g_normalOn) haunchL.textureNum = -3;
     haunchL.matrix.rotate(12, 1, 0, 0);
     haunchL.matrix.rotate(g_leftAngle, 1, 0, 0);
@@ -713,7 +736,7 @@ function renderAllShapes() {
     haunchL.render();
 
     var haunchR = new Cube();
-    haunchR.color = BROWN;
+    haunchR.color = WHITE;
     if (g_normalOn) haunchR.textureNum = -3;
     haunchR.matrix.rotate(12, 1, 0, 0);
     haunchR.matrix.rotate(g_rightAngle, 1, 0, 0);
@@ -726,7 +749,7 @@ function renderAllShapes() {
     // Back legs
 
     var backlegL = new Cube();
-    backlegL.color = BROWN;
+    backlegL.color = WHITE;
     if (g_normalOn) backlegL.textureNum = -3;
     backlegL.matrix = leftCoords;
     backlegL.matrix.translate(0, 0, 0.3);
@@ -737,7 +760,7 @@ function renderAllShapes() {
     backlegL.render();
 
     var backlegR = new Cube();
-    backlegR.color = BROWN;
+    backlegR.color = WHITE;
     if (g_normalOn) backlegR.textureNum = -3;
     backlegR.matrix = rightCoords;
     backlegR.matrix.translate(0, 0, 0.3);
@@ -748,7 +771,7 @@ function renderAllShapes() {
     backlegR.render();
 
     var tail = new Cube();
-    tail.color = BROWN;
+    tail.color = WHITE;
     if (g_normalOn) tail.textureNum = -3;
     tail.matrix.scale(0.2, 0.2, 0.2);
     tail.matrix.translate(-0.5, -1.6, 0);
